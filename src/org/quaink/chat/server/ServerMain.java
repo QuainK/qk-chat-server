@@ -1,13 +1,3 @@
-/*
- * qk-chat-server
- *
- * @author QuainK
- * @version 0.1.0
- * @date 2019.03.31
- *
- * 基本实现功能。能提供与客户端的 TCP 连接，收发消息
- * 此版本只有命令行终端，没有 GUI
- */
 package org.quaink.chat.server;
 
 import java.io.*;
@@ -16,146 +6,206 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class ServerMain {
-    private static final List<Socket> socketList = new ArrayList<>(); // socket 连接列表
-    private static final Map<Socket, String> userName = new HashMap<>(); // 用户名，通过 socket 对应
-    private static final Map<Socket, String> userMsgToSend = new HashMap<>(); // 用户待发消息
-    private static final Map<Socket, InetAddress> userIP = new HashMap<>(); // 用户IP，通过 socket 对应
-    private static boolean serverRunFlag = false; // 服务器运行状态标记
-    private static String serverMsgToSend = ""; // 服务器待发消息
-    private static String newLogLine = ""; // 待打印日志消息
+    public static int PORT = 2333; // 服务器端监听端口
+    public static int maxConnect = 30; // 最大连接数
+    public static List<Socket> mList = new ArrayList<Socket>(); // 客户端 socket 列表
+    public static ServerSocket server = null; // 服务器端 socket
+    public static ExecutorService myExecutorService = null; // 线程池
 
-    private ServerMain() {
-        int port = 2333; // 端口
-        ExecutorService myExecutorService; // 线程池
-        ServerSocket server; // ServerSocket 对象
-        Socket client; // 客户端 socket
+    public static String serverMsgToSend; // 待发服务器消息
+    public static String[] userMsgToSend = new String[maxConnect]; // 待发用户消息数组
+    public static InetAddress[] userAddress = new InetAddress[maxConnect]; //　用户地址数组
+    public static Date[] userLoginDate = new Date[30]; // 用户登录日期时间数组
+    public static boolean serverRunFlag = false; // 服务器运行状态标记
+
+    public ServerMain() {
         try {
-            server = new ServerSocket(port); // 实例化服务器 socket
-            serverRunFlag = true; // 服务器开始运行
-            myExecutorService = Executors.newCachedThreadPool(); // 创建线程池
-            newLogLine = "服务器：服务器运行中，监听端口" + port; // 更新日志消息
-            refreshLog();
-            while (serverRunFlag) { // 服务器一直运行，一直循环判断等待用户 socket 连接
-                client = server.accept(); // 阻塞等待用户socket连接
-                // 如果用户 socket 连接成功，程序继续往下执行
-                socketList.add(client); // 用户 socket 添加到线程池
-                myExecutorService.execute(new Service(client)); // 为这个用户 socket 开启一个子线程
+            // 开始监听端口，启动服务器
+            server = new ServerSocket(PORT);
+            serverRunFlag = true;
+            // 创建一个可缓存线程池
+            myExecutorService = Executors.newCachedThreadPool();
+            // 刷新日志
+            ServerGUI.newLogLine = "服务器：服务器运行中，监听端口" + PORT;
+            System.out.println("***" + getCurrentTimeString() + "***" + ServerGUI.newLogLine);
+            ServerGUI.refreshLog();
+            Socket client = null; // 客户端 socket
+            // 循环阻塞等待客户端 socket 连接
+            while (serverRunFlag) {
+                client = server.accept();
+                // 有客户端连接，获取地址
+                String clientAddressString = client.getInetAddress().toString();
+
+                /*
+                 * 1. 下面注释的部分是为了测试程序在互联网（不同的 IP 网络）上是否成功实现功能。
+                 *
+                 * 2. 如果想要在本地网络（例如手机模拟器、同一台电脑的服务器端和客户端等，
+                 * 即主机名为 localhost 或者 IP 为 127.0.0.1）测试，
+                 * 则保持注释。
+                 *
+                 * 3. 如果仅测试互联网，则取消注释。
+                 */
+/*
+                if (!(clientAddressString.equals("localhost") || clientAddressString.equals("/127.0.0.1"))) {
+                    mList.add(client);
+                    myExecutorService.execute(new Service(client));
+                }
+*/
             }
         } catch (Exception e) {
-            newLogLine = "服务器：服务器启动失败"; // 更新日志消息
-            refreshLog();
-            e.printStackTrace(); // 输出错误日志
+            e.printStackTrace();
         }
     }
 
     public static void main(String[] args) {
-        new ServerMain(); // 匿名构造方法，实例化
+        new ServerMain();
     }
 
-    /* 获取当前时间 */
-    private String getCurrentTimeString() {
+    /* 获取当前时间并返回格式化的字符串 */
+    public static String getCurrentTimeString() {
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
         return sdf.format(new Date());
     }
 
-    /* 刷新日志 */
-    private void refreshLog() {
-        System.out.println("---" + getCurrentTimeString() + "--- " + newLogLine + "\n");
+    /* 停止服务器 */
+    public static void stopServer() {
+        Thread stopServerSubThread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                serverRunFlag = false;
+                ServerGUI.newLogLine = "服务器：正在断开所有客户端连接并关闭服务器";
+                System.out.println("***" + getCurrentTimeString() + "***" + ServerGUI.newLogLine);
+                ServerGUI.refreshLog();
+                ServerGUI.btn_stop.setText("正在关闭");
+                ServerGUI.btn_stop.setEnabled(false);
+                try {
+                    Socket tmpSocket = new Socket("localhost", PORT);
+                    Thread.sleep(100);
+                    tmpSocket.close();
+                    server.close();
+                    server = null;
+                    ServerGUI.btn_stop.setText("关闭服务");
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        });
+        stopServerSubThread.start();
     }
 
-    /* 内部类 Service，指定线程运行的内容 */
-    class Service implements Runnable { // 实现Runnable接口，用于实现多线程功能
-        private final Socket socket; // Service 类私有 socket 对象，用于该线程存储用户 socket
-        private BufferedReader in = null; // 输入流，准备用来读取“用户名”和后续消息
+    /*
+     * 内部类 Service，主要的业务逻辑
+     * 每个客户端都对应一个实例化的该类对象
+     */
+    class Service implements Runnable {
+        private final Socket socket;
+        private BufferedReader in = null;
 
-        Service(Socket socket) { // 构造方法
-            // 等号左边是内部类 Service 私有对象，
-            // 等号右边是外部类 ServerMain 的线程池 execute() 方法中传来的参数
+        public Service(Socket socket) {
             this.socket = socket;
             try {
-                // 输入流
-                in = new BufferedReader(new InputStreamReader(this.socket.getInputStream()));
-                // IP地址
-                userIP.put(this.socket, this.socket.getInetAddress());
-                // 用户名
-                // 用户第一次的输入流是用户名
-                userName.put(this.socket, String.valueOf(in.readLine()));
-                // 服务器准备发出消息，新用户连接
-                serverMsgToSend = "用户" + userName.get(this.socket)
-                        + "加入群聊，当前" + socketList.size() + "人在线";
-                sendServerMsg(); // 发送消息
+                in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                // 0 序号
+                ServerGUI.data[mList.size() - 1][0] = String.valueOf(mList.size() - 1);
+                // 1 状态
+                ServerGUI.data[mList.size() - 1][1] = "已连接";
+                // 2 IP地址
+                userAddress[mList.size() - 1] = this.socket.getInetAddress();
+                ServerGUI.data[mList.size() - 1][2] = String.valueOf(this.socket.getInetAddress());
+                // 3 用户名
+                ServerGUI.data[mList.size() - 1][3] = String.valueOf(in.readLine());
+                // 4 登录时间
+                userLoginDate[mList.size() - 1] = new Date();
+                ServerGUI.data[mList.size() - 1][4] = getCurrentTimeString();
+                // 5 在线时长
+                ServerGUI.data[mList.size() - 1][5] = "0 天 0 时 0 分 0 秒";
+                serverMsgToSend = "用户" + ServerGUI.data[mList.size() - 1][3]
+                        + "加入群聊，当前 " + mList.size() + " 人在线";
+                this.sendMsg(-1);
             } catch (IOException e) {
                 e.printStackTrace();
             }
         }
 
-        /* 线程运行方法 */
         @Override
         public void run() {
             String userMsgReceived;
             try {
-                while (serverRunFlag) { // 不断等待用户的输入
-                    if ((userMsgReceived = in.readLine()) != null) { // 如果输入流不为空
-                        userMsgToSend.put(socket, userMsgReceived); // 存储消息
-                        sendUserMsg(socket);
+                while (serverRunFlag) {
+                    in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                    if ((userMsgReceived = in.readLine()) != null) {
+                        for (int i = 0; i < userAddress.length; ++i) {
+                            if (userAddress[i].equals(this.socket.getInetAddress())) {
+                                userMsgToSend[i] = userMsgReceived;
+                                this.sendMsg(i);
+                                break;
+                            }
+                        }
                     } else {
-                        socketList.remove(socket);
-                        serverMsgToSend = "用户" + userName.get(socket)
-                                + "退出群聊，当前" + socketList.size() + "人在线";
+                        mList.remove(socket);
+                        for (int i = 0; i < userAddress.length; ++i) {
+                            if (userAddress[i].equals(this.socket.getInetAddress())) {
+                                serverMsgToSend = "服务器：用户" + ServerGUI.data[i][3]
+                                        + "退出群聊，当前 " + mList.size()
+                                        + " 人在线";
+                                userAddress[i] = null;
+                                userLoginDate[i] = null;
+                                for (int j = 0; j < 6; j++) {
+                                    ServerGUI.data[i][j] = "";
+                                }
+                                break;
+                            }
+                        }
                         in.close();
                         socket.close();
-                        sendServerMsg();
+                        ServerGUI.newLogLine = serverMsgToSend;
+                        ServerGUI.refreshLog();
+                        this.sendMsg(-1);
                         break;
                     }
                 }
-            } catch (IOException e) {
-                serverRunFlag = false;
-                socketList.remove(socket);
+            } catch (Exception e) {
                 e.printStackTrace();
             }
         }
 
-        /* 为连接上服务端的每个客户端发送其他客户的消息 */
-        void sendUserMsg(Socket userSocket) {
-            for (int index = 0; index < socketList.size(); index++) {
-                Socket currentSocket = socketList.get(index);
-                try {
-                    PrintWriter pout = new PrintWriter(
-                            new BufferedWriter(new OutputStreamWriter(currentSocket.getOutputStream(),
-                                    StandardCharsets.UTF_8)), true);
-                    newLogLine = userName.get(userSocket) + "：" + userMsgToSend.get(userSocket);
-                    pout.println("---" + getCurrentTimeString() + "--- " + newLogLine);
-                    pout.flush();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                    newLogLine = getCurrentTimeString() + "服务器：群发用户消息失败";
-                }
-            }
-            refreshLog();
-        }
+        /* 为连接上服务端的每个客户端发送信息 */
+        public void sendMsg(int msgCreatorIndex) {
+            int num = mList.size();
 
-        /* 为连接上服务端的每个客户端发送服务器的消息 */
-        void sendServerMsg() {
-            for (int index = 0; index < socketList.size(); index++) {
-                Socket currentSocket = socketList.get(index);
+            for (int index = 0; index < num; index++) {
+                Socket mSocket = mList.get(index);
+                PrintWriter pout = null;
                 try {
-                    PrintWriter pout = new PrintWriter(
-                            new BufferedWriter(new OutputStreamWriter(currentSocket.getOutputStream(),
+                    pout = new PrintWriter(
+                            new BufferedWriter(new OutputStreamWriter(mSocket.getOutputStream(),
                                     StandardCharsets.UTF_8)), true);
-                    newLogLine = "服务器：" + serverMsgToSend;
-                    pout.println("---" + getCurrentTimeString() + "--- " + newLogLine);
+                    if (msgCreatorIndex == -1) {
+                        pout.println("***" + getCurrentTimeString() + "***" + "服务器：" + serverMsgToSend);
+                        ServerGUI.newLogLine = "服务器：" + serverMsgToSend;
+                    } else {
+                        pout.println("***" + getCurrentTimeString() + "***"
+                                + ServerGUI.data[msgCreatorIndex][3] + "：" + userMsgToSend[msgCreatorIndex]);
+                        ServerGUI.newLogLine = ServerGUI.data[msgCreatorIndex][3] + "："
+                                + userMsgToSend[msgCreatorIndex];
+                    }
                     pout.flush();
+                    System.out.println("***" + getCurrentTimeString() + "***" + ServerGUI.newLogLine);
+                    ServerGUI.refreshLog();
                 } catch (IOException e) {
                     e.printStackTrace();
-                    newLogLine = getCurrentTimeString() + "服务器：群发服务器消息失败";
+                    ServerGUI.newLogLine = getCurrentTimeString() + "服务器：群发服务器/用户消息失败";
+                    System.out.println("***" + getCurrentTimeString() + "***" + ServerGUI.newLogLine);
+                    ServerGUI.refreshLog();
                 }
             }
-            refreshLog();
         }
     }
 }
